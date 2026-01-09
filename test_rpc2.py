@@ -53,7 +53,6 @@ class RPCStressTest:
                 max_retries=0,  # 不自动重试
             )
             session.mount('http://', adapter)
-            session.mount('https://', adapter)
             self._thread_local.session = session
         return self._thread_local.session
     
