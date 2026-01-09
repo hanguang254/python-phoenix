@@ -39,11 +39,14 @@ def percentile(sorted_vals, p: float):
 
 def make_session(pool_size: int):
     s = requests.Session()
+    # 增加连接池大小以避免阻塞等待
+    # pool_connections: 每个主机的连接池数量
+    # pool_maxsize: 每个连接池的最大连接数（设置为并发数的2倍，确保不会因连接池满而阻塞）
     adapter = requests.adapters.HTTPAdapter(
-        pool_connections=pool_size,
-        pool_maxsize=pool_size,
+        pool_connections=min(pool_size, 100),  # 限制连接池数量，避免过多
+        pool_maxsize=pool_size * 3,  # 每个连接池允许更多连接，减少阻塞
         max_retries=0,
-        pool_block=True,
+        pool_block=True,  # 保持True，但如果连接池足够大，应该不会阻塞
     )
     s.mount("http://", adapter)
     return s
@@ -73,6 +76,7 @@ def worker(thread_id: int, url: str, method: str, params, timeout: float, end_ts
         req_id += 1
         payload = {"jsonrpc": "2.0", "id": req_id, "method": method, "params": params}
 
+        # 记录请求开始时间（在发送请求之前）
         t0 = time.monotonic()
         ok = False
         err_key = None
@@ -80,6 +84,7 @@ def worker(thread_id: int, url: str, method: str, params, timeout: float, end_ts
         error_msg = None
 
         try:
+            # 发送请求并等待响应（这里会阻塞直到收到响应）
             resp = sess.post(url, json=payload, headers=headers, timeout=timeout)
             http_status = resp.status_code
 
@@ -97,6 +102,7 @@ def worker(thread_id: int, url: str, method: str, params, timeout: float, end_ts
                     except Exception as e:
                         error_msg = f"无法读取响应内容: {str(e)}"
             else:
+                # 解析JSON响应（这部分时间也应该计入延迟，因为这是端到端处理的一部分）
                 data = resp.json()
                 if "error" in data:
                     # JSON-RPC 错误
@@ -112,6 +118,8 @@ def worker(thread_id: int, url: str, method: str, params, timeout: float, end_ts
         except Exception as e:
             err_key = f"exc_{type(e).__name__}"
 
+        # 计算延迟：从请求开始到响应处理完成的总时间（毫秒）
+        # 注意：这里计算的是端到端延迟，包括网络传输、服务器处理和JSON解析
         dt = (time.monotonic() - t0) * 1000.0  # ms
 
         with lock:
