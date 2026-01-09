@@ -1,4 +1,4 @@
-from rpc_account import RpcConnect
+
 from web3 import Web3
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import argparse
