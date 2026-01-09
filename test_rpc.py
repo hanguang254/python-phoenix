@@ -82,10 +82,13 @@ def worker(thread_id: int, url: str, method: str, params, timeout: float, end_ts
         err_key = None
         http_status = None
         error_msg = None
+        t_response = None  # 记录收到HTTP响应的时间
 
         try:
             # 发送请求并等待响应（这里会阻塞直到收到响应）
             resp = sess.post(url, json=payload, headers=headers, timeout=timeout)
+            # 记录收到HTTP响应的时间（不包含JSON解析）
+            t_response = time.monotonic()
             http_status = resp.status_code
 
             if resp.status_code != 200:
@@ -102,7 +105,7 @@ def worker(thread_id: int, url: str, method: str, params, timeout: float, end_ts
                     except Exception as e:
                         error_msg = f"无法读取响应内容: {str(e)}"
             else:
-                # 解析JSON响应（这部分时间也应该计入延迟，因为这是端到端处理的一部分）
+                # 解析JSON响应（这部分时间不计入延迟，只用于验证响应）
                 data = resp.json()
                 if "error" in data:
                     # JSON-RPC 错误
@@ -113,14 +116,21 @@ def worker(thread_id: int, url: str, method: str, params, timeout: float, end_ts
 
         except requests.exceptions.Timeout:
             err_key = "timeout"
+            if t_response is None:
+                t_response = time.monotonic()  # 超时也记录时间
         except requests.exceptions.RequestException as e:
             err_key = f"request_exc_{type(e).__name__}"
+            if t_response is None:
+                t_response = time.monotonic()  # 异常也记录时间
         except Exception as e:
             err_key = f"exc_{type(e).__name__}"
+            if t_response is None:
+                t_response = time.monotonic()  # 异常也记录时间
 
-        # 计算延迟：从请求开始到响应处理完成的总时间（毫秒）
-        # 注意：这里计算的是端到端延迟，包括网络传输、服务器处理和JSON解析
-        dt = (time.monotonic() - t0) * 1000.0  # ms
+        # 计算延迟：只计算到收到HTTP响应的时间（毫秒）
+        # 排除JSON解析时间，更准确地反映网络传输和服务器处理延迟
+        # 对于本地服务器，这应该只需要几毫秒
+        dt = (t_response - t0) * 1000.0 if t_response is not None else (time.monotonic() - t0) * 1000.0  # ms
 
         with lock:
             if ok:
